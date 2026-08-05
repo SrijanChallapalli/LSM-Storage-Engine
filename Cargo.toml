@@ -1,0 +1,14 @@
+[package]
+name = "lsm-store"
+version = "0.1.0"
+edition = "2021"
+description = "An LSM-tree storage engine, built in Rust stage by stage."
+license = "MIT"
+repository = "https://github.com/SrijanChallapalli/LSM-Storage-Engine"
+readme = "README.md"
+keywords = ["lsm", "storage-engine", "database", "key-value"]
+categories = ["database-implementations"]
+
+[dependencies]
+
+[dev-dependencies]
