@@ -1,0 +1,18 @@
+# Rust build artifacts
+/target
+
+# Backup files
+**/*.rs.bk
+
+# Local database data produced by the engine / benchmarks
+/data
+*.wal
+*.sst
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+
+# Claude Code local settings
+.claude/
