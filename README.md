@@ -6,8 +6,8 @@ single-node, embedded key–value store with durable writes, crash recovery, and
 compaction — implemented from scratch, without pulling in a storage crate.
 
 > **Status:** early days. Stage 0 (project setup), Stage 1 (the in-memory
-> memtable), and Stage 2 (the public `Engine` API) are done. The remaining
-> stages are scaffolded and land next.
+> memtable), Stage 2 (the public `Engine` API), and Stage 3 (the binary record
+> format) are done. The remaining stages are scaffolded and land next.
 
 ## Planned final API
 
@@ -62,8 +62,9 @@ ahead └─────────────┘           │  immutable mem
 | --------------- | ------ | ------------- |
 | `memtable`      | 1      | ✅ implemented |
 | `engine`        | 2      | ✅ implemented |
+| `record`        | 3      | ✅ implemented |
 | `error`         | 2–5    | ✅ in progress |
-| `wal`           | 3–5    | 🚧 planned     |
+| `wal`           | 4–5    | 🚧 planned     |
 | `sstable`       | 6–7    | 🚧 planned     |
 | `manifest`      | 8      | 🚧 planned     |
 | `compaction`    | 9–12   | 🚧 planned     |
@@ -82,6 +83,20 @@ pub enum Entry {
 
 Deletes insert a tombstone rather than removing the key, and `approximate_size`
 tracks key + value bytes so the engine can decide when to flush.
+
+### The record format (Stage 3)
+
+Every write is an `Operation` (`Put` or `Delete`) serialized to a self-describing,
+checksummed record — the unit the WAL and SSTables are built from:
+
+```text
+checksum (4) │ record type (1) │ key len (4) │ value len (4) │ key │ value
+```
+
+Integers are little-endian; the leading CRC32 covers everything after it. `decode`
+is strict — it rejects empty input, truncated or oversized records, trailing
+bytes, unknown record types, and checksum mismatches — so `decode(encode(op)) == op`
+holds for every valid operation and corruption is caught rather than trusted.
 
 ## Building and testing
 

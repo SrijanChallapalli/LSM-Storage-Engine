@@ -13,7 +13,9 @@
 //! |-------|-----------------------|---------------|
 //! | 1     | [`memtable`]          | implemented   |
 //! | 2     | [`engine`]            | implemented   |
-//! | 3–5   | [`error`], [`wal`]    | error type in progress |
+//! | 3     | [`record`]            | implemented   |
+//! | 4–5   | [`wal`]               | planned       |
+//! | 2–5   | [`error`]             | in progress   |
 //! | 6–7   | [`sstable`]           | planned       |
 //! | 8     | [`manifest`]          | planned       |
 //! | 9–12  | [`compaction`]        | planned       |
@@ -23,9 +25,11 @@ pub mod engine;
 pub mod error;
 pub mod manifest;
 pub mod memtable;
+pub mod record;
 pub mod sstable;
 pub mod wal;
 
 pub use engine::Engine;
 pub use error::{Error, Result};
 pub use memtable::{Entry, MemTable};
+pub use record::Operation;
