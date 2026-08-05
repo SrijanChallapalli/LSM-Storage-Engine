@@ -5,8 +5,9 @@ storage engine written in Rust, built up one stage at a time. The goal is a
 single-node, embedded key–value store with durable writes, crash recovery, and
 compaction — implemented from scratch, without pulling in a storage crate.
 
-> **Status:** early days. Stage 0 (project setup) and Stage 1 (the in-memory
-> memtable) are done. The remaining stages are scaffolded and land next.
+> **Status:** early days. Stage 0 (project setup), Stage 1 (the in-memory
+> memtable), and Stage 2 (the public `Engine` API) are done. The remaining
+> stages are scaffolded and land next.
 
 ## Planned final API
 
@@ -60,7 +61,7 @@ ahead └─────────────┘           │  immutable mem
 | Module          | Stage  | Status        |
 | --------------- | ------ | ------------- |
 | `memtable`      | 1      | ✅ implemented |
-| `engine`        | 2      | 🚧 planned     |
+| `engine`        | 2      | ✅ implemented |
 | `error`         | 2–5    | ✅ in progress |
 | `wal`           | 3–5    | 🚧 planned     |
 | `sstable`       | 6–7    | 🚧 planned     |

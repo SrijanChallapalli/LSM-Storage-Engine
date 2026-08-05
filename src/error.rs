@@ -11,6 +11,8 @@ use std::fmt;
 pub enum Error {
     /// An underlying I/O operation failed.
     Io(std::io::Error),
+    /// A key was empty, which the engine does not allow.
+    EmptyKey,
     /// A record on disk could not be parsed.
     CorruptedRecord,
     /// A record's stored checksum did not match its contents.
@@ -30,6 +32,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Io(source) => write!(f, "i/o error: {source}"),
+            Error::EmptyKey => write!(f, "keys must not be empty"),
             Error::CorruptedRecord => write!(f, "corrupted record"),
             Error::InvalidChecksum => write!(f, "invalid checksum"),
             Error::InvalidManifest => write!(f, "invalid manifest"),

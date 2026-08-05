@@ -12,7 +12,7 @@
 //! | Stage | Module                | Status        |
 //! |-------|-----------------------|---------------|
 //! | 1     | [`memtable`]          | implemented   |
-//! | 2     | [`engine`]            | planned       |
+//! | 2     | [`engine`]            | implemented   |
 //! | 3–5   | [`error`], [`wal`]    | error type in progress |
 //! | 6–7   | [`sstable`]           | planned       |
 //! | 8     | [`manifest`]          | planned       |
@@ -26,5 +26,6 @@ pub mod memtable;
 pub mod sstable;
 pub mod wal;
 
+pub use engine::Engine;
 pub use error::{Error, Result};
 pub use memtable::{Entry, MemTable};
