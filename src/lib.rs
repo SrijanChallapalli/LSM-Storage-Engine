@@ -14,7 +14,8 @@
 //! | 1     | [`memtable`]          | implemented   |
 //! | 2     | [`engine`]            | implemented   |
 //! | 3     | [`record`]            | implemented   |
-//! | 4–5   | [`wal`]               | planned       |
+//! | 4     | [`wal`]               | implemented   |
+//! | 5     | crash recovery        | wired into [`engine`] |
 //! | 2–5   | [`error`]             | in progress   |
 //! | 6–7   | [`sstable`]           | planned       |
 //! | 8     | [`manifest`]          | planned       |

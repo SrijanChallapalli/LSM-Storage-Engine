@@ -5,9 +5,10 @@ storage engine written in Rust, built up one stage at a time. The goal is a
 single-node, embedded key–value store with durable writes, crash recovery, and
 compaction — implemented from scratch, without pulling in a storage crate.
 
-> **Status:** early days. Stage 0 (project setup), Stage 1 (the in-memory
-> memtable), Stage 2 (the public `Engine` API), and Stage 3 (the binary record
-> format) are done. The remaining stages are scaffolded and land next.
+> **Status:** early days. Stages 0–4 are done — project setup, the in-memory
+> memtable, the public `Engine` API, the binary record format, and the
+> write-ahead log. Writes are now crash-durable and recovered on reopen. The
+> remaining stages are scaffolded and land next.
 
 ## Planned final API
 
@@ -63,8 +64,8 @@ ahead └─────────────┘           │  immutable mem
 | `memtable`      | 1      | ✅ implemented |
 | `engine`        | 2      | ✅ implemented |
 | `record`        | 3      | ✅ implemented |
+| `wal`           | 4      | ✅ implemented |
 | `error`         | 2–5    | ✅ in progress |
-| `wal`           | 4–5    | 🚧 planned     |
 | `sstable`       | 6–7    | 🚧 planned     |
 | `manifest`      | 8      | 🚧 planned     |
 | `compaction`    | 9–12   | 🚧 planned     |
@@ -97,6 +98,22 @@ Integers are little-endian; the leading CRC32 covers everything after it. `decod
 is strict — it rejects empty input, truncated or oversized records, trailing
 bytes, unknown record types, and checksum mismatches — so `decode(encode(op)) == op`
 holds for every valid operation and corruption is caught rather than trusted.
+
+### The write-ahead log (Stage 4)
+
+Every `put`/`delete` is made durable before it is visible. The engine follows a
+strict order:
+
+1. encode the operation → 2. append it to the WAL → 3. `fsync` the WAL →
+4. apply it to the memtable → 5. return success.
+
+The memtable is never updated before the append and sync succeed, so an
+acknowledged write is always already on disk. On `Engine::open` the log is
+replayed oldest-to-newest to rebuild the memtable. A crash can leave a torn
+record at the tail of the log; that unacknowledged fragment is ignored on
+replay, while a *complete* record that fails its checksum is surfaced as an
+error rather than trusted. The upshot: write, kill the process, reopen — and the
+exact last committed state comes back.
 
 ## Building and testing
 

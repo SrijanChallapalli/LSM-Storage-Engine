@@ -15,9 +15,10 @@
 //! - **Deleting a missing key:** succeeds and is a no-op from the caller's point
 //!   of view — `get` afterwards returns `None`. (Internally it records a
 //!   tombstone, which matters once lower storage layers exist.)
-//! - **Durability of `put`:** *none yet.* At this stage writes live only in the
-//!   in-memory memtable and are lost when the process exits. The write-ahead log
-//!   in Stage 4 is what will make `put` durable.
+//! - **Durability of `put`:** durable. A `put` (or `delete`) is appended to the
+//!   write-ahead log and `fsync`ed before it is applied in memory, so once the
+//!   call returns `Ok` the write survives a crash and is recovered on the next
+//!   [`open`](Engine::open).
 //! - **`get` return type:** owned `Vec<u8>`. Returning borrowed bytes would tie
 //!   the value's lifetime to internal state that later stages mutate (flushes,
 //!   compaction), so the engine hands back an owned copy.
@@ -27,6 +28,11 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 use crate::memtable::{Entry, MemTable};
+use crate::record::Operation;
+use crate::wal::Wal;
+
+/// Name of the write-ahead log file inside the database directory.
+const WAL_FILE_NAME: &str = "wal.log";
 
 /// Maximum allowed key size, in bytes (64 KiB).
 pub const MAX_KEY_SIZE: usize = 64 * 1024;
@@ -40,6 +46,8 @@ pub const MAX_VALUE_SIZE: usize = 64 * 1024 * 1024;
 pub struct Engine {
     /// Directory that holds this database's on-disk files.
     path: PathBuf,
+    /// Write-ahead log that makes writes durable and recoverable.
+    wal: Wal,
     /// In-memory store of the newest writes.
     memtable: MemTable,
 }
@@ -47,15 +55,23 @@ pub struct Engine {
 impl Engine {
     /// Opens (creating if necessary) the database rooted at `path`.
     ///
-    /// The directory is created if it does not exist. Later stages will replay a
-    /// write-ahead log here to recover the last committed state; for now a fresh
-    /// engine always starts empty.
+    /// The directory is created if it does not exist, and the write-ahead log is
+    /// replayed to rebuild the last committed state, so a database reopened after
+    /// a crash recovers every acknowledged write.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         fs::create_dir_all(&path)?;
+
+        let mut wal = Wal::open(path.join(WAL_FILE_NAME))?;
+        let mut memtable = MemTable::new();
+        for operation in wal.replay()? {
+            Self::apply(&mut memtable, operation);
+        }
+
         Ok(Self {
             path,
-            memtable: MemTable::new(),
+            wal,
+            memtable,
         })
     }
 
@@ -66,13 +82,16 @@ impl Engine {
 
     /// Stores `value` under `key`, replacing any existing value.
     ///
-    /// Returns [`Error::EmptyKey`], [`Error::KeyTooLarge`], or
-    /// [`Error::ValueTooLarge`] for invalid input.
+    /// The write is logged and synced before it becomes visible, so it is
+    /// durable once this returns `Ok`. Returns [`Error::EmptyKey`],
+    /// [`Error::KeyTooLarge`], or [`Error::ValueTooLarge`] for invalid input.
     pub fn put(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
         Self::validate_key(key)?;
         Self::validate_value(value)?;
-        self.memtable.put(key.to_vec(), value.to_vec());
-        Ok(())
+        self.write(Operation::Put {
+            key: key.to_vec(),
+            value: value.to_vec(),
+        })
     }
 
     /// Returns the value stored under `key`, or `None` if the key is absent or
@@ -86,26 +105,46 @@ impl Engine {
     }
 
     /// Deletes `key`. Deleting a key that is not present succeeds.
+    ///
+    /// Like [`put`](Self::put), the deletion is logged and synced before it
+    /// takes effect.
     pub fn delete(&mut self, key: &[u8]) -> Result<()> {
         Self::validate_key(key)?;
-        self.memtable.delete(key.to_vec());
-        Ok(())
+        self.write(Operation::Delete { key: key.to_vec() })
     }
 
-    /// Persists in-memory writes to disk.
+    /// Ensures durable state is on disk.
     ///
-    /// A no-op today — there is no on-disk storage yet. Stage 6 will flush the
-    /// memtable into an SSTable here.
+    /// Each write is already synced individually, so today this just syncs the
+    /// log. Stage 6 will additionally flush the memtable into an SSTable and
+    /// rotate the log here.
     pub fn flush(&mut self) -> Result<()> {
+        self.wal.sync()
+    }
+
+    /// Closes the database, consuming the handle after syncing the log.
+    pub fn close(mut self) -> Result<()> {
+        self.wal.sync()
+    }
+
+    /// Logs an operation durably, then applies it to the memtable.
+    ///
+    /// The order is deliberate: the record is appended and `fsync`ed before the
+    /// memtable is touched, so a visible write is always already on disk and a
+    /// failed append leaves in-memory state untouched.
+    fn write(&mut self, operation: Operation) -> Result<()> {
+        self.wal.append(&operation)?;
+        self.wal.sync()?;
+        Self::apply(&mut self.memtable, operation);
         Ok(())
     }
 
-    /// Closes the database, consuming the handle.
-    ///
-    /// From Stage 4 onward this will flush and sync pending state before
-    /// returning; today it simply drops the in-memory engine.
-    pub fn close(self) -> Result<()> {
-        Ok(())
+    /// Applies a recovered or freshly logged operation to the memtable.
+    fn apply(memtable: &mut MemTable, operation: Operation) {
+        match operation {
+            Operation::Put { key, value } => memtable.put(key, value),
+            Operation::Delete { key } => memtable.delete(key),
+        }
     }
 
     fn validate_key(key: &[u8]) -> Result<()> {
@@ -146,6 +185,7 @@ mod tests {
                 "lsm-store-test-{}-{nanos}-{unique}",
                 std::process::id()
             ));
+            std::fs::create_dir_all(&path).unwrap();
             TestDir(path)
         }
 
@@ -242,5 +282,36 @@ mod tests {
 
         db.flush().unwrap();
         db.close().unwrap();
+    }
+
+    #[test]
+    fn writes_survive_reopen_without_clean_shutdown() {
+        let dir = TestDir::new();
+
+        // Write, then drop the engine WITHOUT calling close() — a stand-in for
+        // the process dying after a successful write.
+        {
+            let mut db = Engine::open(dir.path()).unwrap();
+            db.put(b"a", b"1").unwrap();
+            db.put(b"b", b"2").unwrap();
+            db.delete(b"a").unwrap();
+        }
+
+        // Reopening replays the WAL and recovers the exact last state.
+        let db = Engine::open(dir.path()).unwrap();
+        assert_eq!(db.get(b"a").unwrap(), None); // deletion survived
+        assert_eq!(db.get(b"b").unwrap(), Some(b"2".to_vec())); // value survived
+    }
+
+    #[test]
+    fn overwrites_recover_the_latest_value() {
+        let dir = TestDir::new();
+        {
+            let mut db = Engine::open(dir.path()).unwrap();
+            db.put(b"k", b"old").unwrap();
+            db.put(b"k", b"new").unwrap();
+        }
+        let db = Engine::open(dir.path()).unwrap();
+        assert_eq!(db.get(b"k").unwrap(), Some(b"new".to_vec()));
     }
 }
