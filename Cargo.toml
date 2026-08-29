@@ -10,3 +10,26 @@ keywords = ["lsm", "storage-engine", "database", "key-value"]
 categories = ["database-implementations"]
 
 [dependencies]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bin]]
+name = "workload"
+path = "src/bin/workload.rs"
+
+[[bench]]
+name = "memtable"
+harness = false
+
+[[bench]]
+name = "wal"
+harness = false
+
+[[bench]]
+name = "sstable"
+harness = false
+
+[[bench]]
+name = "compaction"
+harness = false
